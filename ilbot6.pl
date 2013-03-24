@@ -2,8 +2,11 @@
 use v6;
 use Net::IRC::Bot;
 use Net::IRC::Modules::Autoident;
+use DBIish;
 
 class Logger {
+    has $.dbh;
+    has $.sth = self.dbh.prepare('INSERT INTO irclog (channel, day, nick, line, timestamp) VALUES (?, ?, ?, ?, ?)');
     method said($ev) {
         self!log(channel => $ev.where, who => $ev.who, line => $ev.what);
     }
@@ -23,6 +26,9 @@ class Logger {
         say 'leave: ', $ev;
         say "Channels: ", join ', ', @( $ev.state<channels>{ $ev.where } );
     }
+    method irc_ping($ev) {
+        $.dbh.?ping;
+    }
     method topic($ev) {
         self!log(channel => $ev.where, who => '',
             line => $ev.who ~ ' changed the topic to: ' ~ $ev.what
@@ -32,11 +38,27 @@ class Logger {
     method !log(:$channel!, :$who = '', :$line!) {
         my $date = Date.today;
         say "date: $date; channel: $channel; name: $who; line: $line";
+        $.sth.execute($channel, $date, $who, $line, now.Int);
     }
     method FALLBACK($ev) {
 #        say "FALLBACK: ", $ev;
     }
 }
+
+my $config_file = 'config';
+my %config;
+for open($config_file).lines {
+    %config.push: .split(':', 2);
+}
+
+say %config.perl;
+my $dbh = DBIish.connect('mysql',
+    user        => %config<db-user>,
+    password    => %config<db-password>,
+    database    => %config<db-name>,
+);
+
+
 
 Net::IRC::Bot.new(
 	nick       => 'ilbot6',
@@ -44,7 +66,7 @@ Net::IRC::Bot.new(
 	server     => 'irc.freenode.org',
 	channels   => qw/#perl6 #bottest42/,
 	modules    => (
-        Logger.new,
+        Logger.new(:$dbh),
         Net::IRC::Modules::Autoident.new(password => 'wrong'),
 		#Net::IRC::Modules::ACME::Unsmith.new 
 	),
